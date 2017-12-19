@@ -697,7 +697,7 @@ describe('DOMSource.events()', function() {
 
     sources.DOM
       .select('.form')
-      .events('reset')
+      .events('reset', {}, false)
       .addListener({
         next: (ev: Event) => {
           assert.strictEqual(ev.type, 'reset');
@@ -733,19 +733,19 @@ describe('DOMSource.events()', function() {
       const ev = document.createEvent(`MouseEvent`) as MouseEvent;
       ev.initMouseEvent(
         `click`,
-        false /* bubble */,
-        true /* cancelable */,
+        false, // bubble
+        true, // cancelable
         window,
         0,
         0,
         0,
         0,
-        0 /* coordinates */,
+        0, // coordinates
         false,
         false,
         false,
-        false /* modifier keys */,
-        0 /*left*/,
+        false, // modifier keys
+        0, //left
         null,
       );
       el.dispatchEvent(ev);
@@ -757,7 +757,7 @@ describe('DOMSource.events()', function() {
 
     sources.DOM
       .select('.clickable')
-      .events('click', {useCapture: true})
+      .events('click', {useCapture: true}, false)
       .addListener({
         next: (ev: Event) => {
           assert.strictEqual(ev.type, 'click');
@@ -766,15 +766,6 @@ describe('DOMSource.events()', function() {
           assert.strictEqual(target.className, 'clickable');
           assert.strictEqual(target.textContent, 'Hello');
           done();
-        },
-      });
-
-    sources.DOM
-      .select('.clickable')
-      .events('click', {useCapture: false})
-      .addListener({
-        next: x => {
-          done(x);
         },
       });
 
@@ -966,8 +957,12 @@ describe('DOMSource.events()', function() {
     const switchSubject = xs.create<any>();
 
     function component(sources: {DOM: DOMSource}) {
-      const itemMouseDown$ = sources.DOM.select('.item').events('mousedown');
-      const itemMouseUp$ = sources.DOM.select('.item').events('mouseup');
+      const itemMouseDown$ = sources.DOM
+        .select('.item')
+        .events('mousedown', {}, false);
+      const itemMouseUp$ = sources.DOM
+        .select('.item')
+        .events('mouseup', {}, false);
 
       const itemMouseClick$ = itemMouseDown$
         .map(down => itemMouseUp$.filter(up => down.target === up.target))
@@ -997,19 +992,19 @@ describe('DOMSource.events()', function() {
       const ev = document.createEvent('MouseEvent') as MouseEvent;
       ev.initMouseEvent(
         type,
-        false /* bubble */,
-        true /* cancelable */,
+        false, // bubble
+        true, // cancelable
         window,
         0,
         0,
         0,
         0,
-        0 /* coordinates */,
+        0, // coordinates
         false,
         false,
         false,
-        false /* modifier keys */,
-        0 /*left*/,
+        false, // modifier keys
+        0, //left
         null,
       );
 

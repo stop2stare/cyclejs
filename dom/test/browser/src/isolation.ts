@@ -38,48 +38,6 @@ function createRenderTarget(id: string | null = null) {
 }
 
 describe('isolateSource', function() {
-  it('should have the same effect as DOM.select()', function(done) {
-    function app(sources: {DOM: MainDOMSource}) {
-      return {
-        DOM: xs.of(
-          h3('.top-most', [
-            h2('.bar', 'Wrong'),
-            div({isolate: 'foo'}, [h4('.bar', 'Correct')]),
-          ]),
-        ),
-      };
-    }
-
-    const {sinks, sources, run} = setup(app, {
-      DOM: makeDOMDriver(createRenderTarget()),
-    });
-
-    let dispose: any;
-    const isolatedDOMSource = sources.DOM.isolateSource(sources.DOM, 'foo');
-
-    // Make assertions
-    isolatedDOMSource
-      .select('.bar')
-      .elements()
-      .drop(1)
-      .take(1)
-      .addListener({
-        next: (elements: Array<Element>) => {
-          assert.strictEqual(elements.length, 1);
-          const correctElement = elements[0];
-          assert.notStrictEqual(correctElement, null);
-          assert.notStrictEqual(typeof correctElement, 'undefined');
-          assert.strictEqual(correctElement.tagName, 'H4');
-          assert.strictEqual(correctElement.textContent, 'Correct');
-          setTimeout(() => {
-            dispose();
-            done();
-          });
-        },
-      });
-    dispose = run();
-  });
-
   it('should return source also with isolateSource and isolateSink', function(
     done,
   ) {
@@ -123,7 +81,10 @@ describe('isolateSink', function() {
     sinks.DOM.take(1).addListener({
       next: (vtree: VNode) => {
         assert.strictEqual(vtree.sel, 'h3.top-most');
-        assert.strictEqual((vtree.data as any).isolate, 'foo');
+        assert.strictEqual(Array.isArray((vtree.data as any).isolate), true);
+        assert.deepStrictEqual((vtree.data as any).isolate, [
+          {type: 'total', scope: 'foo'},
+        ]);
         setTimeout(() => {
           dispose();
           done();
@@ -166,7 +127,11 @@ describe('isolateSink', function() {
       .addListener({
         next: (vtree: VNode) => {
           assert.strictEqual(vtree.sel, 'span.tab1');
-          assert.strictEqual((vtree.data as any).isolate, '1');
+          assert.strictEqual(Array.isArray((vtree.data as any).isolate), true);
+          assert.strictEqual((vtree.data as any).isolate.length, 1);
+          assert.deepStrictEqual((vtree.data as any).isolate, [
+            {type: 'total', scope: '1'},
+          ]);
           dispose();
           done();
         },
@@ -538,12 +503,14 @@ describe('isolation', function() {
     function Monalisa(sources: {DOM: MainDOMSource}) {
       const {isolateSource, isolateSink} = sources.DOM;
 
-      const islandDOMSource = isolateSource(sources.DOM, 'island');
-      const click$ = islandDOMSource.select('.foo').events('click');
+      const islandDOMSource = isolateSource(sources.DOM, '.island');
+      const monalisaClick$ = islandDOMSource.select('.foo').events('click');
       const islandDOMSink$ = isolateSink(
         xs.of(span('.foo.monalisa', 'Monalisa')),
-        'island',
+        '.island',
       );
+
+      const click$ = sources.DOM.select('.foo').events('click');
 
       const frameDOMSource = isolateSource(sources.DOM, 'myFrame');
       const frame = Frame({DOM: frameDOMSource, content$: islandDOMSink$});
@@ -552,7 +519,8 @@ describe('isolation', function() {
       return {
         DOM: outerVTree$,
         frameClick: frame.click$,
-        monalisaClick: click$,
+        monalisaClick: monalisaClick$,
+        click: click$,
       };
     }
 
@@ -560,6 +528,7 @@ describe('isolation', function() {
       DOM: makeDOMDriver(createRenderTarget()),
       frameClick: sink => {},
       monalisaClick: sink => {},
+      click: sink => {},
     });
     let dispose: any;
 
@@ -573,40 +542,61 @@ describe('isolation', function() {
       tagName: (ev.target as HTMLElement).tagName,
     }));
 
-    // Stop the propagtion of the first click
-    sinks.monalisaClick.take(1).addListener({
-      next: (ev: Event) => ev.stopPropagation(),
-    });
+    const grandparentClick$ = sinks.click.map(ev => ({
+      type: ev.type,
+      tagName: (ev.target as HTMLElement).tagName,
+    }));
 
-    // The frame should be notified about 2 clicks:
-    //  1. the second click on monalisa (whose propagation has not stopped)
-    //  2. the only click on the frame itself
-    const expected = [
-      {type: 'click', tagName: 'SPAN'},
-      {type: 'click', tagName: 'H4'},
-    ];
-    frameClick$.take(2).addListener({
+    // Stop the propagtion of the second click
+    sinks.monalisaClick
+      .drop(1)
+      .take(1)
+      .addListener({
+        next: (ev: Event) => ev.stopPropagation(),
+      });
+
+    let totalClickHandlersCalled = 0;
+    let frameClicked = false;
+    frameClick$.addListener({
       next: event => {
-        const e = expected.shift() as any;
-        assert.strictEqual(event.type, e.type);
-        assert.strictEqual(event.tagName, e.tagName);
-        if (expected.length === 0) {
-          dispose();
-          done();
-        }
+        assert.strictEqual(frameClicked, false);
+        assert.strictEqual(event.type, 'click');
+        assert.strictEqual(event.tagName, 'H4');
+        frameClicked = true;
+        totalClickHandlersCalled++;
       },
     });
 
     // Monalisa should receive two clicks
-    const otherExpected = [
-      {type: 'click', tagName: 'SPAN'},
-      {type: 'click', tagName: 'SPAN'},
-    ];
-    monalisaClick$.take(2).addListener({
+    let monalisaClicked = 0;
+    monalisaClick$.addListener({
       next: event => {
-        const e = otherExpected.shift() as any;
-        assert.strictEqual(event.type, e.type);
-        assert.strictEqual(event.tagName, e.tagName);
+        assert.strictEqual(monalisaClicked < 2, true);
+        assert.strictEqual(event.type, 'click');
+        assert.strictEqual(event.tagName, 'SPAN');
+        monalisaClicked++;
+        totalClickHandlersCalled++;
+      },
+    });
+
+    // The grandparent should receive sibling isolated events
+    // from the monalisa even though it is passed into the
+    // total isolated Frame
+    let grandparentClicked = false;
+    grandparentClick$.addListener({
+      next: event => {
+        assert.strictEqual(event.type, 'click');
+        assert.strictEqual(event.tagName, 'SPAN');
+        assert.strictEqual(grandparentClicked, false);
+        grandparentClicked = true;
+        totalClickHandlersCalled++;
+        assert.doesNotThrow(() => {
+          setTimeout(() => {
+            assert.strictEqual(totalClickHandlersCalled, 4);
+            dispose();
+            done();
+          }, 10);
+        });
       },
     });
 
@@ -628,9 +618,9 @@ describe('isolation', function() {
           assert.strictEqual(frameFoo.tagName, 'H4');
           assert.strictEqual(monalisaFoo.tagName, 'SPAN');
           assert.doesNotThrow(() => {
-            setTimeout(() => monalisaFoo.click());
-            setTimeout(() => monalisaFoo.click());
             setTimeout(() => frameFoo.click(), 0);
+            setTimeout(() => monalisaFoo.click());
+            setTimeout(() => monalisaFoo.click());
           });
         },
       });
@@ -810,7 +800,9 @@ describe('isolation', function() {
         DOM: xs.of(
           h3('.top-most', [
             h2('.bar', 'Wrong'),
-            div({isolate: 'foo'}, [h4('.bar', 'Correct')]),
+            div({isolate: [{type: 'total', scope: 'foo'}]}, [
+              h4('.bar', 'Correct'),
+            ]),
           ]),
         ),
       };
@@ -847,7 +839,11 @@ describe('isolation', function() {
     function app(sources: {DOM: MainDOMSource}) {
       return {
         DOM: xs.of(
-          h3('.top-most', [div({isolate: 'foo'}, [h4('.bar', 'Hello')])]),
+          h3('.top-most', [
+            div({isolate: [{type: 'total', scope: 'foo'}]}, [
+              h4('.bar', 'Hello'),
+            ]),
+          ]),
         ),
       };
     }
@@ -895,7 +891,9 @@ describe('isolation', function() {
         DOM: xs.of(
           h3('.top-most', [
             h2('.bar', 'Wrong'),
-            div({isolate: 'foo'}, [h4('.bar', 'Correct')]),
+            div({isolate: [{type: 'sibling', scope: '.foo'}]}, [
+              h4('.bar', 'Correct'),
+            ]),
           ]),
         ),
       };
@@ -905,7 +903,7 @@ describe('isolation', function() {
       DOM: makeDOMDriver(createRenderTarget()),
     });
     let dispose: any;
-    const isolatedDOMSource = sources.DOM.isolateSource(sources.DOM, 'foo');
+    const isolatedDOMSource = sources.DOM.isolateSource(sources.DOM, '.foo');
 
     let called = false;
 
@@ -968,7 +966,11 @@ describe('isolation', function() {
           div([
             div('.top-most', {isolate: 'top'}, [
               h2('.bar', 'Wrong'),
-              exists ? div({isolate: 'foo'}, [h4('.bar', 'Correct')]) : null,
+              exists
+                ? div({isolate: [{type: 'total', scope: 'foo'}]}, [
+                    h4('.bar', 'Correct'),
+                  ])
+                : null,
             ]),
           ]),
         ),
