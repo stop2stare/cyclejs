@@ -1,3 +1,4 @@
+import './setup';
 import * as assert from 'assert';
 import isolate from '@cycle/isolate';
 import xs, {Stream, MemoryStream} from 'xstream';
@@ -20,12 +21,6 @@ import {
   VNode,
   thunk,
 } from '../../../lib/cjs/index';
-
-// From page/index.html
-declare var isIE10: boolean;
-if (isIE10) {
-  (window as any).MutationObserver = require('mutation-observer');
-}
 
 function createRenderTarget(id: string | null = null) {
   const element = document.createElement('div');

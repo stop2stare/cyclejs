@@ -1,3 +1,4 @@
+import './setup';
 import * as simulant from 'simulant';
 import * as assert from 'assert';
 import isolate from '@cycle/isolate';
@@ -26,12 +27,6 @@ function createRenderTarget(id: string | null = null) {
   }
   document.body.appendChild(element);
   return element;
-}
-
-// From page/index.html
-declare var isIE10: boolean;
-if (isIE10) {
-  (window as any).MutationObserver = require('mutation-observer');
 }
 
 describe('DOMSource.select()', function() {
